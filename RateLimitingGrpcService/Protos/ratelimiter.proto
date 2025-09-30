@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+option csharp_namespace = "RateLimitingGrpcService";
+
+package ratelimit;
+
+service RateLimiterService {
+    rpc CheckRateLimit(RateLimitRequest) returns (RateLimitResponse);
+    rpc ConfigureResource(ConfigureResourceRequest) returns (ConfigureResourceResponse);
+}
+
+message RateLimitRequest {
+    string client_id = 1;
+    string resource = 2;
+}
+
+message RateLimitResponse {
+    bool allowed = 1;
+}
+
+message ConfigureResourceRequest {
+    string resource = 1;
+    int32 max_requests = 2;
+    int32 window_seconds = 3;
+}
+
+message ConfigureResourceResponse {
+    bool success = 1;
+}
