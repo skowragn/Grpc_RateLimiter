@@ -58,8 +58,9 @@ ___
 **Based on the requirements:**
 1. Rate Limiter middleware
   
-<img width="902" height="634" alt="image" src="https://github.com/user-attachments/assets/aef0bb15-1cba-41eb-b6f9-8452ecb25d1c" />
-                                       Figure 1. Rate Limiting Service as a middleware API gateway 
+<img width="1170" height="820" alt="image" src="https://github.com/user-attachments/assets/daffc576-91fa-4229-9da9-0803a2df7c38" />
+
+                    Figure 1. Rate Limiting Service as a middleware API gateway (with MemoryCache)
                                        
 Note: The backend resources routing in case of allowed results has been not implemented (out of scope) 
 
@@ -199,6 +200,7 @@ Swagger from Client:
 https://localhost:7290/swagger
 ```
 <img width="641" height="517" alt="image" src="https://github.com/user-attachments/assets/e3da5631-fe7a-4a88-94ed-8e6b96295413" />
+      Figure 2. Rate Limiting Service as a middleware API gateway (with Distributed Cache - Redis)
 
 ### Note 2: 
 The **RateLimitingGrpcService.Test** is using **Grpc.Core.Testing** library, but is has not been finished yet.
@@ -207,6 +209,13 @@ The **RateLimitingGrpcService.Test** is using **Grpc.Core.Testing** library, but
 ### 4. Future fixes
 -  Replace of the DistributedMemoryCache service usage with the distributed cache for example Redis
   Note: The docker containers should be used for RateLimitingGrpcService and docker container with RedisDB for development and  RedisDB/Azure Redis Cache for production
+
+
+<img width="1190" height="975" alt="image" src="https://github.com/user-attachments/assets/c1172a29-680a-4dd6-99a4-2d5d173ee1e8" />
+
+
+
+
 -  Global error handling with Interceptor
 -  Testing - e.g. RateLimitingInterceptor unit/integration tests; improvement of the current tests samples
 -  More logging
