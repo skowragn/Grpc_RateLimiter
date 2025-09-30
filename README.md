@@ -50,22 +50,24 @@ ___
 -   **Language:** C#
 -   **You may use:** Any NuGet packages you find helpful
 -   **Do not use:** Existing rate limiting libraries 
--   Persistence is not required for this activity.
+      Persistence is not required for this activity.
 ___
 # Solution
 
+The solution consists of:
+- **RateLimitingGrpCService** - ASP.NET Core 9 grpc service
+- **Client** - ASP.NET Core 9 Web API (it is using gRpc Client to call the unary methods from the RateLimitingGrpCService)
+- **RateLimitingGrpCService** - Tests (under construction)
+
 ## Assumptions 
 **Based on the requirements:**
-1. Rate Limiter middleware
+1. Rate Limiter should be middleware
   
 <img width="1170" height="820" alt="image" src="https://github.com/user-attachments/assets/daffc576-91fa-4229-9da9-0803a2df7c38" />
 
                     Figure 1. Rate Limiting Service as a middleware API gateway (with MemoryCache)
-                                       
-Note: The backend resources routing in case of allowed results has been not implemented (out of scope) 
 
-
-2. Fixed window counter algorithms
+2. Fixed window counter algorithms should be used
 3. The gRPC methods here are unary calls - request message as a parameter, and returns the response (similar to actions on web API controllers).
 
 ## Fixed window counter algorithm
@@ -81,26 +83,36 @@ Fixed window counter algorithm works as follows:
 - For this solution, it's best to use an in-memory cache because it's fast (RedisDB or Azure Redis Cache). A database isn't a good solution here because it has slow disk access.
 
 ## Design decisions and trade-offs
-### 1. Cache
-The DistributedMemoryCache service (with MemoryCache implemention - in-memory cache) has been selected to store client counter and resource data. 
-It could be also used ConcurrentDictionary<string,object> which is faster, in case when we do not want to remove anything from cache.
 
-The MemoryCache is not an actual distributed cache. 
-Cached items are stored by the app instance on the server where the app is running as regular .NET objects.
+### 1. Cache
+The DistributedMemoryCache (implementation of IDistributedCache that stores items in memory) has been selected to store client counter and resource data as a first step. 
+It allows for implementing a true distributed caching solution in the future if multiple nodes or fault tolerance become necessary.
+
+It could be also used ConcurrentDictionary<string,object> directly which is faster, in case when we do not want to remove anything from cache.
+
+**\RateLimitingGrpcService\Program.cs**
+```
+builder.Services.AddDistributedMemoryCache();
+```
+The Distributed Memory Cache is not an actual distributed cache. Cached items are stored by the app instance on the server where the app is running. Cached items are stored by the app instance on the server where the app is running as regular .NET objects.
 
 With distributed caching servers like Redis, the cache is located on a different machine, often a dedicated one, and is shared among multiple servers. 
 A distributed cache does not store .NET objects but binary or text (often JSON or XML) data. 
 Therefore, .NET objects should be serialized before being stored in the cache, and deserialized after being retrieved.
 With MemoryCache, serialization and deserialization is not necessary.
 
-If we have several instances of our current implemention of RateLimitingService , there will be several in-memory caches, each in a different machine. One node may not be aware of the changes done by the second node, and even if the database is consistent, it will not get to the database because of its own local cache. In that case users/clients seeing diffrent data from diffrent servers.
+If the RateLimitingService have several instances of the current implemention, there will be several in-memory caches, each in a different machine. One node may not be aware of the changes done by the second node, and even if the database is consistent, it will not get to the database because of its own local cache. In that case users/clients seeing diffrent data from diffrent servers.
 
-Program.cs
-```
-builder.Services.AddDistributedMemoryCache();
-```
-Next step:  Replacement of the MemoryCache with some Distributed Cache for example e.g. RedisDB / Azure Redis Cache.
+Next step:  Replacement of the MemoryCache with some Distributed Cache for example e.g. RedisDB / Azure Redis Cache with read/write cache improvement.
 
+**\RateLimitingGrpcService\Program.csProgram.cs**
+```
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration["ConnectionString:Redis"];
+    options.InstanceName = "Instance";
+});
+```
 
 ### 2. RateLimitingGrpcService
 The RateLimiterService service (\RateLimitingGrpcService\Services\ **RateLimiterService.cs** ) has the main implemention of the **CheckRateLimit** and **ConfigureResource** methods from **ratelimiter.proto** file:
@@ -117,7 +129,7 @@ The ratelimit algorithm is located in the **RateLimitingInterceptor** class (\Ra
 It is dedicated for grpc service solution from **Grpc.Core.Interceptors.Interceptor** which is called before grpc methods from **RateLimiterService** (it works in the similar way as the ASP.NET Core Web Api Middleware, but additionally it has an input parameters from request).
 
 **Based on proto file and rpc method definition:**
-- The unary grpc methods are needed for our solution. It is simpler to implement than stream methods.
+- The unary grpc methods are needed for our solution. It is simpler to implement than the streaming methods.
 
 \RateLimitingGrpcService\Program.cs
 ```
@@ -125,21 +137,20 @@ builder.Services.AddGrpc(c => c.Interceptors.Add<RateLimitingInterceptor>());
 ```
 \RateLimitingGrpcService\Interceptor\ **RateLimitingInterceptor.cs
 
-**UnaryServerHandler method**
+**UnaryServerHandler method - basic flow**
 1.	Check if the called endpoint is ConfigureResource. If so, the input data from current request is cached.
-2.	The result is saved in the
+2.	The result is saved in the httpContext.Features:
 ```
 httpContext.Features.Set(new ConfigureResourceResponse { Success = false/true });
 ```
  and ConfigureResource API from RateLimiterService is called via continuation(request, context) with stored result in context.
 3. Check if the called endpoint is CheckRateLimit. The client and resource data is fetched from cache and ratelimit check is executed.
 ```
-private static bool IsRateLimitCompleted(ClientStatistics? clientStatistics, LimitRequests? resourceLimits)
- {
-     return clientStatistics != null && resourceLimits != null && DateTime.UtcNow <
-            clientStatistics.LastSuccessfulResponseTime.AddSeconds(resourceLimits.TimeWindow) &&
-            clientStatistics.NumberOfRequestsCompletedSuccessfully == resourceLimits.MaxRequests;
- }
+private static bool IsRateLimitCompleted(ClientStatistics clientStatistics, LimitRequests resourceLimits)
+{
+    return DateTime.UtcNow < clientStatistics.LastSuccessfulResponseTime.AddSeconds(resourceLimits.TimeWindow) &&
+           clientStatistics.NumberOfRequestsCompletedSuccessfully == resourceLimits.MaxRequests;
+}
 ```
 4. Based on the result next client call is allowed or disallowed.
    The result is saved in the
@@ -148,13 +159,14 @@ private static bool IsRateLimitCompleted(ClientStatistics? clientStatistics, Lim
 ```
  and CheckRateLimit API from RateLimiterService is called via continuation(request, context) with stored result in context.
 
+
 ### 3. How to build and run the solution
 1. Please as a first build the **RateLimitingGrpcService.csproj**
 2. The following files should be generated by the protocol buffer compiler: **Ratelimiter.cs** and **RatelimiterGrpc.cs** (\RateLimitingGrpcService\obj\Debug\net9.0\Protos)
    They are required to use the rpc types (RateLimitRequest, RateLimitResponse, RateLimiterServiceBase, RateLimiterServiceClient etc.) in RateLimiterService, Client (REST Web API) and Tests solutions.
 
 ### Note 1: 
-please check if the following part is in the **RateLimitingGrpcService.csproj** before build: 
+Please check if the following part is in the **RateLimitingGrpcService.csproj** before build: 
 ```
 <ItemGroup>
      <Protobuf Include="Protos\ratelimiter.proto" GrpcServices="Both" />
@@ -162,6 +174,7 @@ please check if the following part is in the **RateLimitingGrpcService.csproj** 
 ```
 3. Then you can use the REST API Client (ASP.NET Core 9 Web API with calling grpc method via Grpc Client)
 The Grpc Methods are called with the **Grpc Client** (from **Grpc.Net.Client** library):
+
 **Client.csproj** 
 ```
     <ItemGroup>
@@ -172,7 +185,7 @@ The Grpc Methods are called with the **Grpc Client** (from **Grpc.Net.Client** l
 ```
 services.AddGrpcClient<RateLimitingGrpcService.RateLimiterService.RateLimiterServiceClient>(client =>
  {
-     client.Address = new Uri("https://localhost:7285");
+     client.Address = new Uri("https://localhost:5001");
  });
 
 services.AddScoped<IRateLimiterGrpcService, RateLimiterGrpcService>();
@@ -203,26 +216,32 @@ https://localhost:7290/swagger
       Figure 2. Rate Limiting Service as a middleware API gateway (with Distributed Cache - Redis)
 
 ### Note 2: 
-The **RateLimitingGrpcService.Test** is using **Grpc.Core.Testing** library, but is has not been finished yet.
+The **RateLimitingGrpcService.Test** is using **Grpc.Core.Testing** library.
 
 
 ### 4. Future fixes
--  Replace of the DistributedMemoryCache service usage with the distributed cache for example Redis
-  Note: The docker containers should be used for RateLimitingGrpcService and docker container with RedisDB for development and  RedisDB/Azure Redis Cache for production
-
+1. Replace of the DistributedMemoryCache service usage with the real distributed cache with for example Redis
+  Note: The docker containers could be used for RateLimitingGrpcService and docker container with RedisDB for development and  RedisDB/Azure Redis Cache for production
 
 <img width="1190" height="975" alt="image" src="https://github.com/user-attachments/assets/c1172a29-680a-4dd6-99a4-2d5d173ee1e8" />
 
 
 
 
--  Global error handling with Interceptor
--  Testing - e.g. RateLimitingInterceptor unit/integration tests; improvement of the current tests samples
--  More logging
--  Refactoring/Code clean up
-  
--  Consider to implement ratelimiter for grpc stream methods (with partitions)
--  For Cloud solution with one-time setting in the configuration file, the Azure Api Management should be considered
+2.  Global error handling with Interceptor
+3. Testing - e.g. RateLimitingInterceptor unit/integration tests; improvement of the current tests samples
+4. More logging, tracing
+5. Refactoring/Code clean up
+6. Consider to implement RateLimiter with grpc streaming methods (including partitions setup) - e.g. gRPC bidirectional streaming can be used to replace unary gRPC calls in high-performance scenarios.
+```
+rpc BookCatalogStream (stream BookCatalogRequest) returns (stream BookCatalogResponse);
+service RateLimiter {
+    rpc CheckRateLimit(stream RateLimitRequest) returns (stream RateLimitResponse);
+    rpc ConfigureResource(stream ConfigureResourceRequest) returns (stream ConfigureResourceResponse);
+}
+```
+
+7. For Cloud solution with one-time setting in the configuration file, the Azure Api Management should be considered
   (Grpc API with APIM: https://learn.microsoft.com/en-us/azure/api-management/grpc-api?tabs=portal and https://learn.microsoft.com/en-us/microsoft-cloud/dev/dev-proxy/concepts/implement-rate-limiting-azure-api-management)
 
 ### 5. Design decisions and trade-offs
