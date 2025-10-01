@@ -267,7 +267,6 @@ The **RateLimitingGrpcService.Test** is using **Grpc.Core.Testing** library.
 7. Consider to implement RateLimiter with grpc streaming methods - e.g. gRPC bidirectional streaming can be used to replace unary gRPC calls in high-performance scenarios.
 
 ```C#
-rpc BookCatalogStream (stream BookCatalogRequest) returns (stream BookCatalogResponse);
 service RateLimiter {
     rpc CheckRateLimit(stream RateLimitRequest) returns (stream RateLimitResponse);
     rpc ConfigureResource(stream ConfigureResourceRequest) returns (stream ConfigureResourceResponse);
