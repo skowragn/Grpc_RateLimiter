@@ -105,8 +105,7 @@ await _grpcClient.CheckRateLimitAsync(limitRequest, cancellationToken: cancellat
 ```C#
 builder.Services.AddDistributedMemoryCache();
 ```
-#### Multi Server Environment
-
+### 2. Multi Server Environment
 #### Scalability and Reliability
 Scaling the system to support multiple servers and concurrent threads.
 
