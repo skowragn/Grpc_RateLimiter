@@ -263,7 +263,7 @@ The **RateLimitingGrpcService.Test** is using **Grpc.Core.Testing** library.
 3. Add Global error handling with Interceptor
 4. Testing - e.g. RateLimitingInterceptor unit/integration tests; improvement of the current tests samples
 5. More logging, tracing
-6. Authentication and Authorization (wiyh OIDC/OAuth 2.0/2.1)
+6. Authentication and Authorization (with OIDC/OAuth 2.0/2.1 (IdentityServer, AAD etc.) and Interceptor)
 7. Consider to implement RateLimiter with grpc streaming methods - e.g. gRPC bidirectional streaming can be used to replace unary gRPC calls in high-performance scenarios.
 
 ```C#
